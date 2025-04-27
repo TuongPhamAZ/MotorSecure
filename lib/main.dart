@@ -14,6 +14,7 @@ import 'package:motor_secure/services/background_service.dart';
 import 'package:motor_secure/services/notification_service.dart';
 import 'package:motor_secure/services/pref_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -37,6 +38,9 @@ void main() async {
   DependencyInjection.init();
   await NotificationService.initialize();
 
+  // Yêu cầu các quyền cần thiết
+  await requestRequiredPermissions();
+
   // Khởi tạo dịch vụ nền
   await BackgroundService.initialize();
 
@@ -44,6 +48,12 @@ void main() async {
   bool isLoggedIn = await checkLoginStatus();
   if (isLoggedIn) {
     await BackgroundService.startService();
+
+    // Hiển thị hướng dẫn mở cài đặt tối ưu hóa pin nếu cần
+    if (await Permission.ignoreBatteryOptimizations.isDenied) {
+      // Sẽ hiển thị hướng dẫn sau khi ứng dụng khởi động
+      _showBatteryOptimizationGuideAfterAppStart = true;
+    }
   }
 
   runApp(MyApp(isLoggedIn: isLoggedIn));
@@ -63,6 +73,28 @@ Future<bool> checkLoginStatus() async {
 
   return true;
 }
+
+/// Yêu cầu các quyền cần thiết
+Future<void> requestRequiredPermissions() async {
+  // Yêu cầu quyền thông báo
+  await NotificationService.requestNotificationPermissions();
+
+  // Yêu cầu quyền vị trí
+  await Permission.location.request();
+
+  // Yêu cầu quyền vị trí nền (chỉ yêu cầu nếu đã cấp quyền vị trí)
+  if (await Permission.location.isGranted) {
+    await Permission.locationAlways.request();
+  }
+
+  // Yêu cầu quyền vô hiệu hóa tối ưu pin
+  if (await Permission.ignoreBatteryOptimizations.status.isDenied) {
+    await Permission.ignoreBatteryOptimizations.request();
+  }
+}
+
+// Biến để kiểm soát hiển thị hướng dẫn sau khi ứng dụng khởi động
+bool _showBatteryOptimizationGuideAfterAppStart = false;
 
 class MyApp extends StatelessWidget {
   final bool isLoggedIn;

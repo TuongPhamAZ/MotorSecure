@@ -88,6 +88,21 @@ class NotificationService {
     });
   }
 
+  /// Yêu cầu quyền thông báo
+  static Future<void> requestNotificationPermissions() async {
+    // Yêu cầu quyền FCM
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+    await messaging.requestPermission(
+      alert: true,
+      announcement: true,
+      badge: true,
+      carPlay: false,
+      criticalAlert: true,
+      provisional: false,
+      sound: true,
+    );
+  }
+
   // Xử lý payload từ thông báo
   static void _handleNotificationPayload(String payload) {
     if (payload.startsWith('vehicle:')) {
