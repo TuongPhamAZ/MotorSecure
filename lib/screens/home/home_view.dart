@@ -12,6 +12,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:motor_secure/services/background_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key});
@@ -57,6 +59,11 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
     _pageController = PageController(initialPage: 0);
     _getCurrentLocation();
     _loadUserVehicles();
+
+    // Kiểm tra và hiển thị hướng dẫn tối ưu hóa pin sau 5 giây
+    Future.delayed(const Duration(seconds: 5), () {
+      _checkAndShowBatteryOptimizationGuide();
+    });
   }
 
   @override
@@ -956,5 +963,41 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
           vehicle.longitude,
         ) /
         1000; // Chuyển đổi từ mét sang km
+  }
+
+  // Kiểm tra và hiển thị hướng dẫn tối ưu hóa pin
+  Future<void> _checkAndShowBatteryOptimizationGuide() async {
+    if (await Permission.ignoreBatteryOptimizations.isDenied) {
+      // Hiển thị dialog hướng dẫn
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Tắt tối ưu hóa pin'),
+            content: const Text(
+              'Để đảm bảo ứng dụng có thể chạy ngầm và nhận thông báo khi phương tiện gặp sự cố, '
+              'vui lòng tắt tối ưu hóa pin cho ứng dụng này.\n\n'
+              'Bạn sẽ được chuyển đến màn hình cài đặt pin. Hãy tìm Motor Secure '
+              'và đánh dấu "Không giới hạn" hoặc "Không tối ưu hóa".',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Để sau'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  BackgroundService.openBatteryOptimizationSettings();
+                },
+                child: const Text('Đi đến cài đặt'),
+              ),
+            ],
+          ),
+        );
+      }
+    }
   }
 }

@@ -12,6 +12,9 @@ import 'package:motor_secure/firebase_options.dart';
 import 'package:motor_secure/services/notification_manager.dart';
 import 'package:motor_secure/services/pref_service.dart';
 import 'package:motor_secure/services/vehicle_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:app_settings/app_settings.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Dịch vụ chạy nền để theo dõi trạng thái xe
 class BackgroundService {
@@ -20,6 +23,9 @@ class BackgroundService {
 
   static Future<void> initialize() async {
     final service = FlutterBackgroundService();
+
+    // Yêu cầu quyền vô hiệu hóa tối ưu hóa pin
+    await _requestBatteryOptimizationPermission();
 
     // Thiết lập kênh thông báo cho thông báo foreground service
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -42,7 +48,7 @@ class BackgroundService {
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
         autoStart: true,
-        isForegroundMode: true,
+        isForegroundMode: false,
         notificationChannelId: _notificationChannelId,
         initialNotificationTitle: 'Motor Secure đang chạy',
         initialNotificationContent: 'Đang giám sát phương tiện của bạn...',
@@ -55,6 +61,13 @@ class BackgroundService {
         onBackground: _onIosBackground,
       ),
     );
+  }
+
+  /// Yêu cầu người dùng vô hiệu hóa tối ưu hóa pin cho ứng dụng
+  static Future<void> _requestBatteryOptimizationPermission() async {
+    if (await Permission.ignoreBatteryOptimizations.status.isDenied) {
+      await Permission.ignoreBatteryOptimizations.request();
+    }
   }
 
   /// Bắt đầu dịch vụ nền
@@ -104,6 +117,9 @@ class BackgroundService {
       service.on('stopService').listen((event) {
         service.stopSelf();
       });
+
+      // Đảm bảo dịch vụ chạy ở chế độ nền kể cả khi ứng dụng đóng
+      await service.setAsForegroundService();
     }
 
     // Đường dẫn đến notification icon trong thư mục drawable
@@ -116,42 +132,72 @@ class BackgroundService {
     final vehicleService = VehicleService();
     final notificationManager = NotificationManager();
 
-    // Interval cập nhật thông báo (mỗi 30 giây)
-    const updateInterval = Duration(seconds: 30);
+    // Cơ chế kiểm tra và khởi động lại định kỳ
+    bool isServiceRunning = true;
 
-    // Cập nhật thông báo foreground mỗi 30 giây
-    Timer.periodic(updateInterval, (timer) async {
-      if (service is AndroidServiceInstance) {
-        // Cập nhật notification
-        service.setForegroundNotificationInfo(
-          title: "Motor Secure đang chạy",
-          content:
-              "Đang giám sát vào lúc ${DateTime.now().hour}:${DateTime.now().minute}",
-        );
-      }
+    // Interval cập nhật thông báo (mỗi 15 giây)
+    const updateInterval = Duration(seconds: 15);
 
-      // Tải dữ liệu người dùng từ SharedPreferences
-      UserModel? userData = await PrefService.loadUserData();
-
-      if (userData != null && userData.vehicleId.isNotEmpty) {
-        // Tạo stream lắng nghe thay đổi dữ liệu vehicle
-        final vehicleIds = userData.vehicleId;
-
-        // Lấy dữ liệu vehicle hiện tại
-        vehicleService.getVehiclesStreamByIds(vehicleIds).listen((vehicles) {
-          // Kiểm tra từng xe
-          for (var vehicle in vehicles) {
-            _checkEmergencyStatus(
-              vehicle,
-              emergencyHandled,
-              userData,
-              notificationManager,
-              service,
-            );
-          }
-        });
+    // Trình kiểm tra kết nối và tự khởi động lại sau 1 phút nếu kết nối bị mất
+    Timer.periodic(const Duration(minutes: 1), (timer) async {
+      if (!isServiceRunning) {
+        // Khởi tạo lại Firebase nếu cần
+        try {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+          isServiceRunning = true;
+          print("Đã khởi động lại kết nối Firebase");
+        } catch (e) {
+          print("Lỗi khởi động lại kết nối: $e");
+        }
       }
     });
+
+    // Cập nhật thông báo foreground mỗi 15 giây
+    Timer.periodic(updateInterval, (timer) async {
+      try {
+        if (service is AndroidServiceInstance) {
+          // Cập nhật notification
+          await service.setForegroundNotificationInfo(
+            title: "Motor Secure đang giám sát",
+            content:
+                "Đang giám sát vào lúc ${DateTime.now().hour}:${DateTime.now().minute}",
+          );
+        }
+
+        // Tải dữ liệu người dùng từ SharedPreferences
+        UserModel? userData = await PrefService.loadUserData();
+
+        if (userData != null && userData.vehicleId.isNotEmpty) {
+          // Tạo stream lắng nghe thay đổi dữ liệu vehicle
+          final vehicleIds = userData.vehicleId;
+
+          // Lấy dữ liệu vehicle hiện tại
+          vehicleService.getVehiclesStreamByIds(vehicleIds).listen((vehicles) {
+            // Kiểm tra từng xe
+            for (var vehicle in vehicles) {
+              _checkEmergencyStatus(
+                vehicle,
+                emergencyHandled,
+                userData,
+                notificationManager,
+                service,
+              );
+            }
+          }, onError: (error) {
+            print("Lỗi khi lắng nghe dữ liệu xe: $error");
+            isServiceRunning = false; // đánh dấu để khởi động lại kết nối
+          });
+        }
+      } catch (e) {
+        print("Lỗi trong Timer kiểm tra: $e");
+        isServiceRunning = false; // đánh dấu để khởi động lại kết nối
+      }
+    });
+
+    // Ghi nhận thông tin khởi động dịch vụ
+    print("Dịch vụ chạy nền Motor Secure đã được khởi động");
   }
 
   /// Kiểm tra trạng thái khẩn cấp của xe và gửi thông báo nếu cần
@@ -207,5 +253,19 @@ class BackgroundService {
       // Đặt lại trạng thái để thử lại sau
       emergencyHandled[vehicleId] = false;
     }
+  }
+
+  /// Kiểm tra và mở màn hình cài đặt để vô hiệu hóa tối ưu hóa pin
+  static Future<void> openBatteryOptimizationSettings() async {
+    if (await Permission.ignoreBatteryOptimizations.status.isDenied) {
+      // Mở màn hình cài đặt pin
+      await AppSettings.openAppSettings();
+    }
+  }
+
+  /// Mở cài đặt khởi động tự động (cho các thiết bị Xiaomi, Huawei, Samsung...)
+  static Future<void> openAutoStartSettings() async {
+    // Mở cài đặt ứng dụng
+    await AppSettings.openAppSettings();
   }
 }
