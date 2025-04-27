@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:motor_secure/screens/notifications/notifications_view.dart';
+import 'package:motor_secure/screens/home/home_view.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
@@ -12,9 +12,14 @@ class NotificationService {
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
-  // Giữ ID của thông báo hiện tại để theo dõi
   static int _notificationId = 0;
   static bool _isRepeatingActive = false;
+
+  // Theo dõi các thông báo khẩn cấp đã gửi để tránh trùng lặp
+  static final Map<String, DateTime> _sentEmergencyNotifications = {};
+
+  // Thời gian minimum giữa các thông báo giống nhau (5 phút)
+  static const Duration _minimumNotificationInterval = Duration(minutes: 5);
 
   static Future<void> initialize() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -30,9 +35,10 @@ class NotificationService {
       onDidReceiveNotificationResponse: (NotificationResponse response) async {
         if (response.payload != null) {
           _isRepeatingActive = false;
-
           await cancelAllNotifications();
-          navigatorKey.currentState?.pushNamed(NotificationsView.routeName);
+
+          // Xử lý payload có chứa vehicleId
+          _handleNotificationPayload(response.payload!);
         }
       },
     );
@@ -69,13 +75,34 @@ class NotificationService {
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (message.notification != null) {
+        final String vehicleId = message.data['vehicleId'] as String? ?? '';
+
         showHighPriorityNotification(
           title: message.notification!.title ?? 'Cảnh báo khẩn cấp',
           body: message.notification!.body ?? 'Kiểm tra ngay lập tức!',
-          payload: 'notification_payload',
+          payload: vehicleId.isNotEmpty
+              ? 'vehicle:$vehicleId'
+              : 'notification_payload',
         );
       }
     });
+  }
+
+  // Xử lý payload từ thông báo
+  static void _handleNotificationPayload(String payload) {
+    if (payload.startsWith('vehicle:')) {
+      // Trích xuất vehicleId
+      final String vehicleId = payload.substring(8);
+
+      // Chuyển đến HomeView với vehicleId
+      navigatorKey.currentState?.pushNamed(
+        HomeView.routeName,
+        arguments: {'targetVehicleId': vehicleId},
+      );
+    } else {
+      // Chuyển đến HomeView mà không có arguments cụ thể
+      navigatorKey.currentState?.pushNamed(HomeView.routeName);
+    }
   }
 
   static Future<void> showHighPriorityNotification({
@@ -126,23 +153,61 @@ class NotificationService {
     await _notificationsPlugin.cancelAll();
   }
 
-  static Future<void> sendHighPriorityNotificationToTokens(
+  static Future<bool> sendHighPriorityNotificationToTokens(
     List<String> tokens, {
     required String title,
     required String body,
+    String? vehicleId,
   }) async {
+    // Tạo notificationKey để theo dõi thông báo đã gửi
+    final String notificationKey = '$title:$body:${vehicleId ?? ""}';
+
+    // Kiểm tra xem thông báo tương tự đã gửi gần đây chưa
+    final lastSentTime = _sentEmergencyNotifications[notificationKey];
+    final now = DateTime.now();
+
+    if (lastSentTime != null &&
+        now.difference(lastSentTime) < _minimumNotificationInterval) {
+      print('Bỏ qua thông báo trùng lặp: $notificationKey');
+      return false; // Bỏ qua thông báo trùng lặp gửi quá sớm
+    }
+
+    // Ghi nhận thời gian gửi thông báo
+    _sentEmergencyNotifications[notificationKey] = now;
+
+    // Giới hạn kích thước của Map theo dõi để tránh tràn bộ nhớ
+    if (_sentEmergencyNotifications.length > 100) {
+      // Xóa các mục cũ nhất
+      final entries = _sentEmergencyNotifications.entries.toList();
+      entries.sort((a, b) => a.value.compareTo(b.value));
+      final oldestKeys = entries
+          .take(_sentEmergencyNotifications.length - 50)
+          .map((e) => e.key)
+          .toList();
+
+      for (var key in oldestKeys) {
+        _sentEmergencyNotifications.remove(key);
+      }
+    }
+
     _isRepeatingActive = true;
+
+    final String payload =
+        vehicleId != null ? 'vehicle:$vehicleId' : 'notification_payload';
 
     await showHighPriorityNotification(
       title: title,
       body: body,
-      payload: 'notification_payload',
+      payload: payload,
     );
 
-    _startRepeatingSound(title, body);
+    _startRepeatingSound(title, body, payload);
+
+    return true;
   }
 
-  static void _startRepeatingSound(String title, String body) async {
+  static void _startRepeatingSound(
+      String title, String body, String payload) async {
     if (!_isRepeatingActive) return;
 
     await Future.delayed(const Duration(seconds: 5));
@@ -157,10 +222,10 @@ class NotificationService {
         await showHighPriorityNotification(
           title: title,
           body: body,
-          payload: 'notification_payload',
+          payload: payload,
         );
 
-        _startRepeatingSound(title, body);
+        _startRepeatingSound(title, body, payload);
       } else {
         _isRepeatingActive = false;
       }
