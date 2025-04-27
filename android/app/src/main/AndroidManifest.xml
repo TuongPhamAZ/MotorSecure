@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+         xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
@@ -7,6 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:label="Motor Secure"
         android:name="${applicationName}"
@@ -14,7 +16,7 @@
 
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="INPUT YOUR API KEY HERE"/>
+            android:value="AIzaSyBktQcRvPIs__4Jzm3xy6tg5hQ5rO_eEYA"/>
         
         <activity
             android:name=".MainActivity"
@@ -49,6 +51,29 @@
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
         />
+        
+        <!-- Background Service Configuration -->
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="dataSync|location"
+            android:exported="false"
+            tools:replace="android:exported"
+        />
+
+        <!-- Receiver for auto-starting the service on boot -->
+        <receiver
+            android:name="id.flutter.flutter_background_service.WatchdogReceiver"
+            android:exported="false"
+            tools:replace="android:exported"
+        />
+        <receiver
+            android:name="id.flutter.flutter_background_service.BootReceiver"
+            android:exported="false"
+            tools:replace="android:exported">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

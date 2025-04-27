@@ -31,6 +31,9 @@ dependencies:
   string_validator: ^1.1.0
   stylish_bottom_bar: ^1.1.1
   url_launcher: ^6.2.6
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.0
+  flutter_background_service_ios: ^5.0.3
 
 
 dev_dependencies:
