@@ -10,6 +10,8 @@ import 'package:motor_secure/widgets/util_widgets.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key});
@@ -35,12 +37,18 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
   // Dữ liệu đường đi
   Map<String, List<Map<String, dynamic>>> _pathPointsMap = {};
 
+  // Bản đồ markers
+  Set<Marker> _markers = {};
+
   // Thông tin vị trí hiện tại
   Position? _currentPosition;
   GoogleMapController? _mapController;
 
   // Thời gian cập nhật gần nhất
   DateTime _lastUpdated = DateTime.now();
+
+  // Tập marker tạm thời khi bấm vào bản đồ
+  Marker? _tempMarker;
 
   @override
   void initState() {
@@ -154,6 +162,27 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
     return _vehicles[_currentPage];
   }
 
+  // Hàm lấy địa chỉ từ tọa độ
+  Future<String> _getAddressFromLatLng(double lat, double lng) async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+            'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&zoom=18&addressdetails=1'),
+        headers: {'User-Agent': 'MotorSecure App'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['display_name'] ?? 'Không xác định';
+      } else {
+        return 'Không thể lấy địa chỉ';
+      }
+    } catch (e) {
+      print("Lỗi khi lấy địa chỉ: $e");
+      return 'Không thể lấy địa chỉ';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Xác định hiển thị nút điều hướng
@@ -212,7 +241,6 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
                     )
                   : Stack(
                       children: [
-                        // PageView cho các thiết bị
                         PageView.builder(
                           controller: _pageController,
                           physics:
@@ -456,24 +484,34 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
     final String vehicleId = _vehicleIds[index];
     final Set<Polyline> polylines = _createPolylines(vehicleId);
 
+    // Tạo tập markers mới bắt đầu với marker thiết bị
+    _markers = {};
+
+    // Thêm marker tạm thời nếu có
+    if (_tempMarker != null) {
+      _markers.add(_tempMarker!);
+    }
+
     if (vehicle != null) {
+      _markers.add(
+        Marker(
+          markerId: MarkerId(_vehicleIds[index]),
+          position: LatLng(vehicle.latitude, vehicle.longitude),
+          infoWindow: InfoWindow(
+            title: 'Vị trí thiết bị',
+            snippet: 'ID: ${_vehicleIds[index]}',
+          ),
+          icon: _getMarkerIcon(vehicle),
+        ),
+      );
+
       // Nếu có thông tin vehicle, hiển thị vị trí của vehicle
       return GoogleMap(
         initialCameraPosition: CameraPosition(
           target: LatLng(vehicle.latitude, vehicle.longitude),
           zoom: 15,
         ),
-        markers: {
-          Marker(
-            markerId: MarkerId(_vehicleIds[index]),
-            position: LatLng(vehicle.latitude, vehicle.longitude),
-            infoWindow: InfoWindow(
-              title: 'Vị trí thiết bị',
-              snippet: 'ID: ${_vehicleIds[index]}',
-            ),
-            icon: _getMarkerIcon(vehicle),
-          ),
-        },
+        markers: _markers,
         polylines: polylines,
         onMapCreated: (controller) {
           _mapController = controller;
@@ -489,12 +527,54 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
         compassEnabled: true,
         mapType: MapType.normal,
         trafficEnabled: false,
-        onTap: (LatLng position) {
-          // Xử lý khi người dùng nhấp vào bản đồ
-          _showLocationInfoDialog(position);
+        onTap: (LatLng position) async {
+          // Lấy khoảng cách đến thiết bị nếu có
+          final String distance = _currentVehicle != null
+              ? '${_calculateDistance(position, _currentVehicle!).toStringAsFixed(2)} km'
+              : '';
+
+          // Lấy địa chỉ từ vị trí
+          final address = await _getAddressFromLatLng(
+              position.latitude, position.longitude);
+
+          // Tạo marker mới
+          setState(() {
+            _tempMarker = Marker(
+              markerId: const MarkerId('selected_location'),
+              position: position,
+              infoWindow: InfoWindow(
+                title: address,
+                snippet: distance.isNotEmpty ? 'Khoảng cách: $distance' : '',
+              ),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueViolet),
+            );
+
+            // Cập nhật markers và di chuyển camera
+            _markers.add(_tempMarker!);
+            _mapController?.animateCamera(CameraUpdate.newLatLng(position));
+
+            // Hiển thị InfoWindow
+            Future.delayed(const Duration(milliseconds: 300), () {
+              _mapController
+                  ?.showMarkerInfoWindow(const MarkerId('selected_location'));
+            });
+          });
         },
       );
     } else if (_currentPosition != null) {
+      _markers.add(
+        Marker(
+          markerId: const MarkerId('currentLocation'),
+          position:
+              LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+          infoWindow: InfoWindow(
+            title: 'Vị trí hiện tại',
+            snippet: 'ID: ${_vehicleIds[index]}',
+          ),
+        ),
+      );
+
       // Nếu không có thông tin vehicle nhưng có vị trí hiện tại, hiển thị vị trí hiện tại
       return GoogleMap(
         initialCameraPosition: CameraPosition(
@@ -502,17 +582,7 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
               LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
           zoom: 15,
         ),
-        markers: {
-          Marker(
-            markerId: const MarkerId('currentLocation'),
-            position:
-                LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-            infoWindow: InfoWindow(
-              title: 'Vị trí hiện tại',
-              snippet: 'ID: ${_vehicleIds[index]}',
-            ),
-          ),
-        },
+        markers: _markers,
         polylines: polylines,
         onMapCreated: (controller) {
           _mapController = controller;
@@ -528,9 +598,39 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
         compassEnabled: true,
         mapType: MapType.normal,
         trafficEnabled: false,
-        onTap: (LatLng position) {
-          // Xử lý khi người dùng nhấp vào bản đồ
-          _showLocationInfoDialog(position);
+        onTap: (LatLng position) async {
+          // Lấy khoảng cách đến thiết bị nếu có
+          final String distance = _currentVehicle != null
+              ? '${_calculateDistance(position, _currentVehicle!).toStringAsFixed(2)} km'
+              : '';
+
+          // Lấy địa chỉ từ vị trí
+          final address = await _getAddressFromLatLng(
+              position.latitude, position.longitude);
+
+          // Tạo marker mới
+          setState(() {
+            _tempMarker = Marker(
+              markerId: const MarkerId('selected_location'),
+              position: position,
+              infoWindow: InfoWindow(
+                title: address,
+                snippet: distance.isNotEmpty ? 'Khoảng cách: $distance' : '',
+              ),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueViolet),
+            );
+
+            // Cập nhật markers và di chuyển camera
+            _markers.add(_tempMarker!);
+            _mapController?.animateCamera(CameraUpdate.newLatLng(position));
+
+            // Hiển thị InfoWindow
+            Future.delayed(const Duration(milliseconds: 300), () {
+              _mapController
+                  ?.showMarkerInfoWindow(const MarkerId('selected_location'));
+            });
+          });
         },
       );
     } else {
@@ -811,6 +911,7 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
       },
     );
   }
+
   // Hiển thị hộp thoại xác nhận xóa đường đi
   void _showClearPathDialog(BuildContext context) {
     final String currentVehicleId = _vehicleIds[_currentPage];
@@ -839,36 +940,6 @@ class _HomeViewState extends State<HomeView> implements HomeViewContract {
               },
               child:
                   const Text('Xóa tất cả', style: TextStyle(color: Colors.red)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // Hiển thị thông tin khi nhấp vào bản đồ
-  void _showLocationInfoDialog(LatLng position) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Thông tin vị trí'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Vĩ độ: ${position.latitude.toStringAsFixed(6)}'),
-              Text('Kinh độ: ${position.longitude.toStringAsFixed(6)}'),
-              const SizedBox(height: 10),
-              if (_currentVehicle != null)
-                Text(
-                    'Khoảng cách đến thiết bị: ${_calculateDistance(position, _currentVehicle!).toStringAsFixed(2)} km'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Đóng'),
             ),
           ],
         );

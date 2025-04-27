@@ -6,10 +6,8 @@ class AuthenticationService {
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // Get current user ID
   String? get userId => FirebaseAuth.instance.currentUser?.uid;
 
-  // Sign out
   Future<void> signOut() async {
     try {
       await _auth.signOut();
@@ -19,7 +17,6 @@ class AuthenticationService {
     }
   }
 
-  // Sign in
   Future<UserCredential?> signInWithEmailAndPassword(String email, String password, AuthResult authResult) async {
     try {
       final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
@@ -55,7 +52,6 @@ class AuthenticationService {
     }
   }
 
-  // sign up
   Future<UserCredential?> signUpWithEmailAndPassword(String emailAddress, String password) async {
     try {
       final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
@@ -95,7 +91,6 @@ class AuthenticationService {
     }
   }
 
-  // send reset password email
   Future<String?> sendPasswordResetEmail(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email);
@@ -110,34 +105,24 @@ class AuthenticationService {
     }
   }
 
-  // Change password
   Future<bool> changePassword(String newPassword) async {
     try {
       User? user = FirebaseAuth.instance.currentUser;
 
       if (user != null) {
         await user.updatePassword(newPassword);
-        // authResult.code = AuthResult.Success;
         print("Password changed successfully.");
         return true;
       } else {
-        // authResult.code = AuthResult.UnknownError;
-        // authResult.text = "No user is signed in.";
         print("No user is signed in.");
         return false;
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'weak-password') {
-        // authResult.code = AuthResult.WeakPassword;
-        // authResult.text = 'The password is too weak.';
         print('The password is too weak.');
       } else if (e.code == 'requires-recent-login') {
-        // authResult.code = AuthResult.RequiresRecentLogin;
-        // authResult.text = 'Please re-authenticate to change your password.';
         print('Please re-authenticate to change your password.');
       } else {
-        // authResult.code = AuthResult.UnknownError;
-        // authResult.text = '${e.message}';
         print('Error: ${e.message}');
       }
       return false;

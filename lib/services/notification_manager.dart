@@ -11,28 +11,50 @@ class NotificationManager {
     required String content,
     required List<String> tokens,
     String? userId,
+    String? vehicleId,
   }) async {
     try {
       // Lấy userId từ người dùng hiện tại nếu không được cung cấp
       final String actualUserId =
           userId ?? UserSingleton.getInstance().currentUser?.id ?? '';
 
-      print("Tạo thông báo với userId: $actualUserId");
+      print("Xử lý thông báo khẩn cấp với userId: $actualUserId");
 
-      final notification = NotificationModel.create(
+      // Tìm kiếm thông báo cùng loại gần đây
+      // (cùng tiêu đề, nội dung và người dùng trong khoảng thời gian ngắn)
+      final recentNotifications =
+          await _repository.getRecentEmergencyNotifications(
+        userId: actualUserId,
         title: title,
         content: content,
-        userId: actualUserId,
+        timeFrame: const Duration(minutes: 10), // Trong khoảng 10 phút
+        vehicleId: vehicleId,
       );
 
-      await _repository.addNotification(notification);
+      // Chỉ tạo thông báo mới trong database nếu không tìm thấy thông báo tương tự gần đây
+      if (recentNotifications.isEmpty) {
+        print("Tạo thông báo mới trong database");
+        final notification = NotificationModel.create(
+          title: title,
+          content: content,
+          userId: actualUserId,
+        );
 
+        await _repository.addNotification(notification);
+      } else {
+        print(
+            "Đã tìm thấy thông báo tương tự gần đây, bỏ qua việc tạo thông báo mới");
+      }
+
+      // Luôn gửi FCM notification để đảm bảo người dùng nhận được cảnh báo
       await NotificationService.sendHighPriorityNotificationToTokens(
         tokens,
         title: title,
         body: content,
+        vehicleId: vehicleId,
       );
     } catch (e) {
+      print("Lỗi khi gửi thông báo khẩn cấp: ${e.toString()}");
       rethrow;
     }
   }
