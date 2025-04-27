@@ -154,13 +154,13 @@ class _NotificationsViewState extends State<NotificationsView>
               final result = await _presenter.deleteNotification(
                 _notifications[index].id,
               );
-              Navigator.pop(context); // Đóng dialog loading
+              onPopContext(); // Đóng dialog loading
 
               if (result) {
                 setState(() {
                   _selectedItemIndex = null;
+                  _notifications.removeAt(index);
                 });
-                loadData(); // reload lại danh sách thông báo
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Đã xóa thông báo thành công')),
                 );
