@@ -10,6 +10,7 @@ import 'package:motor_secure/controller/session_controller.dart';
 import 'package:motor_secure/data/models/user_model.dart';
 import 'package:motor_secure/screens/home/home_view.dart';
 import 'package:motor_secure/services/authentication_service.dart';
+import 'package:motor_secure/services/background_service.dart';
 import 'package:motor_secure/services/notification_service.dart';
 import 'package:motor_secure/services/pref_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -35,7 +36,15 @@ void main() async {
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   DependencyInjection.init();
   await NotificationService.initialize();
+
+  // Khởi tạo dịch vụ nền
+  await BackgroundService.initialize();
+
+  // Bắt đầu dịch vụ nền nếu người dùng đã đăng nhập
   bool isLoggedIn = await checkLoginStatus();
+  if (isLoggedIn) {
+    await BackgroundService.startService();
+  }
 
   runApp(MyApp(isLoggedIn: isLoggedIn));
 }
@@ -46,17 +55,13 @@ Future<bool> checkLoginStatus() async {
     return false;
   }
 
-  String password = await PrefService.getPassword();
-  final AuthenticationService _auth = AuthenticationService();
-  UserCredential? userCredential = await _auth.signInWithEmailAndPassword(
-      loggedUser.email, password, AuthResult());
+  User? currentFirebaseUser = FirebaseAuth.instance.currentUser;
 
-  if (userCredential != null) {
-    SessionController.getInstance().loadUser(loggedUser);
-    return true;
+  if (currentFirebaseUser == null) {
+    return false;
   }
 
-  return false;
+  return true;
 }
 
 class MyApp extends StatelessWidget {
